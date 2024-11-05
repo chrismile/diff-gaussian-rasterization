@@ -284,6 +284,7 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
+	float* __restrict__ out_gradient,
 	const float* __restrict__ depths,
 	float* __restrict__ invdepth)
 {
@@ -316,6 +317,9 @@ renderCUDA(
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
+
+	float G[CHANNELS*3] = { 0 };
+	float alpha_acc[3] = { 0 };
 
 	float expected_invdepth = 0.0f;
 
@@ -367,9 +371,31 @@ renderCUDA(
 				continue;
 			}
 
+			const float dg_dx = (- con_o.x * d.x - con_o.y * d.y);
+			const float dg_dy = (- con_o.y * d.x - con_o.z * d.y);
+			const float dg_dxy = -con_o.y;
+
+			const float dalpha_dx = dg_dx * alpha;
+			const float dalpha_dy = dg_dy * alpha;
+			const float dalpha_dxy = (dg_dx * dg_dy  + dg_dxy) * alpha;
+
 			// Eq. (3) from 3D Gaussian splatting paper.
-			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+			for (int ch = 0; ch < CHANNELS; ch++) {
+				float splat_color = features[collected_id[j] * CHANNELS + ch];
+				float color = splat_color * alpha * T;
+
+				// gradients of the alpha channel with respect to dx,dy,dxy
+
+				G[ch*3+2] += splat_color * (T*dalpha_dxy - alpha_acc[0]*dalpha_dy - alpha_acc[1]*dalpha_dx - alpha_acc[2]*alpha);
+				G[ch*3+0] += splat_color * (T*dalpha_dx  - alpha_acc[0]*alpha);
+				G[ch*3+1] += splat_color * (T*dalpha_dy  - alpha_acc[1]*alpha);
+
+				C[ch] += color;
+            }
+
+			alpha_acc[2] = alpha_acc[2]*(1-alpha) - alpha_acc[0] * dalpha_dy - alpha_acc[1] * dalpha_dx + T * dalpha_dxy;
+			alpha_acc[0] = alpha_acc[0]*(1-alpha) + T * dalpha_dx;
+			alpha_acc[1] = alpha_acc[1]*(1-alpha) + T * dalpha_dy;
 
 			if(invdepth)
 			expected_invdepth += (1 / depths[collected_id[j]]) * alpha * T;
@@ -391,6 +417,14 @@ renderCUDA(
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 
+	    if (out_gradient) {
+            for (int ch = 0; ch < CHANNELS; ch++){
+                // TODO background is missing in this term
+                for(int i = 0; i < 3; i++)
+                    out_gradient[(ch*3+i) * H * W + pix_id] = G[ch * 3 + i];
+            }
+	    }
+
 		if (invdepth)
 		invdepth[pix_id] = expected_invdepth;// 1. / (expected_depth + T * 1e3);
 	}
@@ -408,6 +442,7 @@ void FORWARD::render(
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
+	float* out_gradient,
 	float* depths,
 	float* depth)
 {
@@ -422,6 +457,7 @@ void FORWARD::render(
 		n_contrib,
 		bg_color,
 		out_color,
+		out_gradient,
 		depths, 
 		depth);
 }
