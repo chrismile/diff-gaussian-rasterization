@@ -53,7 +53,8 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& campos,
 	const bool prefiltered,
 	const bool antialiasing,
-	const bool debug)
+	const bool debug,
+	const bool useGradients)
 {
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
     AT_ERROR("means3D must have dimensions (num_points, 3)");
@@ -67,8 +68,11 @@ RasterizeGaussiansCUDA(
   auto float_opts = means3D.options().dtype(torch::kFloat32);
 
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
-  torch::Tensor out_gradient = torch::full({NUM_CHANNELS*3, H, W}, 0.0, float_opts);
   torch::Tensor out_invdepth = torch::full({0, H, W}, 0.0, float_opts);
+  torch::Tensor out_gradient;
+  if (useGradients) {
+      out_gradient = torch::full({NUM_CHANNELS*3, H, W}, 0.0, float_opts);
+  }
   float* out_invdepthptr = nullptr;
 
   out_invdepth = torch::full({1, H, W}, 0.0, float_opts).contiguous();
@@ -116,7 +120,7 @@ RasterizeGaussiansCUDA(
 		tan_fovy,
 		prefiltered,
 		out_color.contiguous().data<float>(),
-		out_gradient.contiguous().data<float>(),
+		useGradients ? out_gradient.contiguous().data<float>() : nullptr,
 		out_invdepthptr,
 		antialiasing,
 		radii.contiguous().data<int>(),

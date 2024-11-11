@@ -77,7 +77,8 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.campos,
             raster_settings.prefiltered,
             raster_settings.antialiasing,
-            raster_settings.debug
+            raster_settings.debug,
+            raster_settings.use_gradients
         )
 
         # Invoke C++/CUDA rasterizer
@@ -154,6 +155,7 @@ class GaussianRasterizationSettings(NamedTuple):
     prefiltered : bool
     debug : bool
     antialiasing : bool
+    use_gradients : bool
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
